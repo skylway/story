@@ -1,9 +1,7 @@
 ### GO-MICRO架构图（三层设计，5大模块组成）
 
-![111.png][1]
+![avatar][go-micro.png]
 
-
-  [1]: https://www.skylway.com/usr/uploads/2020/07/2331984594.png
 
 1，最上层的service是基于Go-Micro所构建的服务，属于应用层。
 2，中层的Client与Server是第一层中service所包含的服务请求端与服务响应端，它们存在于service中，处于设计中的中游，是Go-Micro体系中一切请求与响应的出入口

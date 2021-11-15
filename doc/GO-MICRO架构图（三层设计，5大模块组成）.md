@@ -1,6 +1,8 @@
 ### GO-MICRO架构图（三层设计，5大模块组成）
 
-![avatar][go-micro.png]
+<div align=center>
+    <img src="go-micro.png" width="1024"/>
+</div>
 
 
 1，最上层的service是基于Go-Micro所构建的服务，属于应用层。

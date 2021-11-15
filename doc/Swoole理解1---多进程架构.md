@@ -1,0 +1,44 @@
+## Swoole理解1---多进程架构
+
+####简介
+Swoole Server和Nginx服务一样，采用了多进程的架构模型。相比于多线程模型，多进程结构管理方便，不存在线程冲突和线程安全问题，代码编写相对简单，而缺点在于进程和进程之间的通信没有多线程模型直接，存在一定的损耗。另外一方面，过去的PHP开发大多依赖于PHP-FPM，这也是一个多进程的模型。因此为了减少学习成本，降低开发难度，Swoole最终选择了多进程架构。下面，我们就来详细讲解Swoole当做不同进程所扮演的角色和实现的功能。
+
+####Master进程
+Master进程是Swoole Server的主进程。当我们启动Swoole Server时，当前进程就会作为Master进程存在。Swoole的Master进程主要负责创建和管理Reactor线程、启动主Reactor对象、创建Manager进程、接收客户端连接请求等工作。
+
+在主Master进程中，首先Master进程会通过fork方法创建一个Manager进程，这个进程的具体作用将会在后面的小节中讲到。
+
+接着，Master进程会创建一个Reactor对象，这个对象底层封装了一个Epoll实例（在Mac系统下是Kqueue），这个对象用于实际监听和处理来自客户端的Connect请求（也就是处理Accept事件）。
+
+随后，Master进程会创建N（N由实际配置选项reactor_num、worker_num和CPU实际核心数目共同决定）个Reactor线程，每个线程中实际运行了一个Reactor对象。这些Reactor线程则用于接收来自客户端发送的数据、发送来自服务器的响应数据、处理Swoole定时器事件等任务，Swoole所有的异步API基本都依赖于这些Reactor对象实现。
+
+当以上操作都处理完成之后，Master进程会调用onStart回调函数，上层应用可以在这个回调里针对Master进程做一些处理，比如给Master进程重命名，保存Master进程的PID文件等。需要注意的是，因为Master进程当中不存在任何业务逻辑，因此底层不允许在onStart回调当中做太多的事情，比如发送请求、调用Swoole的异步API等等。
+
+当Master进程退出时，会先调用onShutdown回调，在这里可以执行一些回收操作。
+
+####Manager进程
+Manager进程是Swoole的管理进程，这个进程没有其他的任务，它仅仅负责创建、回收、管理所有的Worker进程。当Manager进程被创建出来之后，就会调用onManagerStart回调通知上层应用。随后，该进程就会根据worker_num配置选项和task_worker_num所指定的Worker数量，创建worker_num个Worker进程和task_worker_num`个Task Worker进程。当这些进程因意外原因退出或者主动关闭之后，Manager进程会回收这些退出的进程，并重新创建一个新的进程处出来，由此保证了Worker进程的数目不变。
+
+同样的，当Manager进程退出后，也会调用onManagerStop回调函数，从而允许程序执行一些回收逻辑。
+
+####Worker进程
+Worker进程是Swoole的工作进程，实际上绝大部分逻辑代码都是在Worker进程中执行的，因此Worker进程所对应的回调函数也是最多的。
+
+当Worker进程启动时，会调用onWorkerStart回调函数。在这个回调函数中，我们就基本可以调用Swoole全部的API了。通常在这里，我们可以保存和初始化一些静态变量（比如某些单例的初始化），以供后续的程序调用。
+
+当Master进程的Reactor线程收到某个客户端发来的消息之后，就会把这些消息打包发送给Worker进程。Worker进程收到消息后，就在对应的回调函数里（比如onReceive、onRequest、onMessage等）处理这些数据，如果需要，就将处理结果回传给Reactor线程，由Reactor线程发送给对应的客户端。
+
+当Worker进程正常退出时，会调用onWorkerStop回调；与之对应的，如果Worker进程是非正常退出的，那么就会调用onWorkerError回调，我们可以在这里执行异常退出的逻辑。
+
+####进程间通信
+前面提到过，Master进程中的Reactor收到数据之后，需要将数据发送给Worker进程，而Worker进程的响应数据也需要发送给Master进程。实际上，Worker进程和Worker进程之间也存在通信需求，这就涉及到了进程间通信。
+
+在Swoole当中，进程间通信分为以下几种情况：
+
+- Master进程和Worker进程通信
+- Worker进程和Worker进程间通信
+- Worker进程和Task Worker进程间通信
+
+前两种情况，在Swoole底层统一使用Unix Socket进行通信，这些socket也都归并到各自进程的Reactor对象中进行管理。而第三种情况，除了默认的Unix Socket通信之外，还可以选用系统提供的消息队列（message queue）来实现。
+
+文章来自喵星球
